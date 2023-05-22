@@ -1,0 +1,883 @@
+---
+title: "AD699_FinalProject"
+author: "Paul Seiters"
+date: "2023-05-06"
+output: html_document
+---
+
+#AD699 Final Project
+
+Jason Zhang, Eyebrow, Elle Pincer, Paul Seiters, Luke Brady
+
+Read your data into your local environment, and subset/filter the data so that you are
+dealing only with the records that pertain to your team’s neighbourhood_cleansed.
+Please note: You may wish to use read_csv() from readr, rather than read.csv(), for bringing
+this dataset into your environment. read_csv() uses a character encoding system that will
+enable all the original characters, including Spanish accent marks, to render properly on your
+screen.
+
+```{r}
+library(readr)
+library(dplyr)
+library(caret)
+```
+
+
+```{r}
+b <- read.csv("~/Downloads/buenos.csv")
+r <- b[b$neighbourhood_cleansed=='Retiro',]
+```
+```{r}
+dim(r)
+```
+
+##I. Missing Values
+
+A. Does your data contain any missing values and/or blank cells? If so, what
+can you do about this? Show the R code that you used to handle your
+missing values.
+
+```{r}
+missing_values_table <- data.frame(colSums(is.na(r)))
+
+```
+```{r}
+percent_missing_table <- data.frame(colMeans(is.na(r))*100)
+
+percent_missing_table
+```
+
+Columns that contain missing values: 
+
+description, neighborhood_overview, host_location, host_about, host_neighbourhood, neighbourhood, neighbourhood_group_cleansed, bathrooms, bedrooms, calendar_updated, first_review, last_review, review_scores_rating, review_scores_accuracy, review_scores_cleanliness, review_scores_checkin, review_scores_communication, review_scores_location, review_scores_value, license, reviews_per_month
+
+Columns with more than 45% missing values per column:
+```{r}
+percent_missing <- colMeans(is.na(r)) * 100
+variables_over_50 <- names(percent_missing[percent_missing > 50])
+percent_missing_50_table <- data.frame(variables = variables_over_50, percent_missing = percent_missing[variables_over_50])
+percent_missing_50_table
+```
+```{r}
+cols_to_remove <- names(percent_missing[percent_missing > 50])
+
+r <- r[, !(names(r) %in% cols_to_remove)]
+```
+
+We decided to remove any variable that has more than 45% of values missing.
+
+Logical Walkthrough of rest of columns that have values missing or are irrelevant to our project yields the removal of the following variables:
+
+
+```{r}
+r2 <- r[, !(names(r) %in% c("id", "listing_url", "scrape_id", "last_scraped", "source", "picture_url", "host_id", "host_url", "host_thumbnail_url", "host_picture_url", "neighbourhood", "neighbourhood_group_cleansed", "minimum_minimum_nights", "maximum_minimum_nights", "minimum_maximum_nights", "maximum_maximum_nights", "minimum_nights_avg_ntm", "maximum_nights_avg_ntm", "calendar_last_scraped", "host_listings_count", "neighborhood"))]
+
+head(r2)
+```
+
+```{r}
+missing_values_table2 <- data.frame(colSums(is.na(r2)))
+
+missing_values_table2
+```
+```{r}
+str(r2)
+```
+
+There are several variables that need further further preprocessing based on their data type. We will perform additional preprocessing steps when the individual tasks require them later in the project.
+
+To further eliminate null values from our dataframe, we decided to only include rows in our dataset for which we have actual rating scores. 
+
+```{r}
+colSums(is.na(r2))
+```
+```{r}
+r2 <- r2[complete.cases(r2[, c("review_scores_rating", "review_scores_accuracy", "review_scores_cleanliness", "review_scores_checkin", "review_scores_communication", "review_scores_location", "review_scores_value")]), ]
+```
+
+```{r}
+dim(r2)
+```
+
+```{r}
+colSums(is.na(r2))
+```
+
+With the very limited number of null values left, we feel confident in using the median imputation method for remaining numerical null values. This will not impact our ability to build reliable models using train and test sets.
+
+```{r}
+library(dplyr)
+
+r_clean <- r2 %>%
+  mutate_if(is.numeric, ~if_else(is.na(.), median(., na.rm = TRUE), .))
+```
+```{r}
+colSums(is.na(r_clean))
+```
+
+In our handling of null values we did the two steps. First, we inspected the dataframe and used logic and reason to decide which varibales are useful to us and which variables do not make sense. Then, we looked at the null values in our new dataframe. By manual inspection of the dataframe, we were quickly able to detect a pattern: If one review score or other non-text variable is missing, it is very probable that all review scores and other numericals are missing in that record. Hence, we wrote a code that removes all records for which all ratings are null values. This gives us a dataframe with 888 rows. By inspecting datatypes using the str() function, we can see that additional preprocessing is definitely necessary to perform some of the analysis below. We decieded to perform these manipulations decentralized with using the r_clean dataframe as our common starting point.
+
+###II. Summary Statistics
+
+A. Take a peek at your data, and then brainstorm a bit about some questions
+that you’d like to answer with summary statistics. To answer these questions
+choose any five of the summary statistics functions shown in the textbook,
+class slides, or anywhere else to learn a little bit about your data set. Your
+summary stats should have a consistent theme. (For instance: Our team
+wanted to know more about variable x, so we did these things…)
+
+B. Show screenshots of the results. Describe your findings in 1-2 paragraphs.
+Explain them in the context of your theme.
+K Nearest Neighbors
+
+
+
+```{r}
+r_clean_subset <- r_clean[, c("price", "host_total_listings_count", "bedrooms", "accommodates", "beds", "maximum_nights", "minimum_nights", "review_scores_accuracy", "review_scores_communication")]
+
+r_clean_subset$price <- as.numeric(gsub("\\$|,", "", r_clean_subset$price))
+
+summary(r_clean_subset)
+```
+```{r}
+r_clean$price <- as.numeric(gsub("\\$|,", "", r_clean$price))
+r_clean$price <- as.numeric(as.character(r_clean$price))
+mean(r_clean$price)
+median(r_clean$price)
+sd(r_clean$price)
+min(r_clean$price)
+max(r_clean$price)
+#quantile(r_clean$price, probs = c(0.25, 0.5, 0.75))
+```
+
+
+
+###III. Data Visualization
+
+A. Using ggplot, create any five plots that help to describe your data. Use five
+unique types of plots to do this. As you do, remember to think about the
+types of variables that you are representing with a particular plot. Think of
+these plots as expository (not exploratory) so be sure to include clear axis
+labels and plot titles.
+Your visualizations should have a consistent theme. (For instance: Our team
+wanted to know more about variable x, so we did these things…) This theme
+does not have to be the same as the theme from your summary stats.
+
+```{r}
+r_clean_Viz<- r_clean
+```
+
+```{r}
+r_clean_Viz$price <- as.numeric(gsub("\\$|,", "", r_clean_Viz$price))
+```
+
+
+
+```{r}
+# ----------below are my temporary one for taking spot --------------------------
+#III.A
+library(ggplot2)
+library(forcats)
+
+#plot1 number of bed vs bedroom 
+#ggplot(r_clean_Viz, aes(x = beds, fill = factor(bedrooms))) +
+#  geom_bar(position = "dodge") +
+#  labs(title = "Number of Beds by Number of Bedrooms",
+#       x = "Number of Beds",
+#       y = "Count",
+#       fill = "Number of Bedrooms")
+
+#scatter price beds
+ggplot(data = subset(r_clean_Viz, price < 100000), aes(x = beds, y = price)) +
+  geom_point() +
+  labs(title = "Scatterplot of Price and Beds",
+       x = "Beds",
+       y = "Price") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$"),
+                     limits = c(0, 100000))
+
+
+#plot location
+library(leaflet)
+
+map <- leaflet() %>%
+  setView(-58.3743, -34.5906, zoom = 13) %>%
+  addTiles()
+
+for (i in 1:nrow(r_clean_Viz)) {
+  map <- addMarkers(map, 
+                    lat = r_clean_Viz[i, "latitude"], 
+                    lng = r_clean_Viz[i, "longitude"],
+                    options = markerOptions(iconSize = c(8, 10)/2)) # set marker size
+}
+
+map
+
+
+#plot price
+
+ggplot(data = subset(r_clean_Viz, price >= 0 & price <= 200000), aes(x = price)) +
+  geom_histogram(binwidth = 1000, color = "black", fill = "lightblue") +
+  geom_vline(aes(xintercept = mean(price)), color = "red", linetype = "dashed", size = 1) +
+  xlab("Price") +
+  ylab("Frequency") +
+  ggtitle("Histogram of Price with Average Line")
+
+
+#plot2 #review of cleanliness vs review per month 
+ggplot(r_clean_Viz, aes(x = reviews_per_month, y = review_scores_cleanliness, size = accommodates, color = room_type)) +
+  geom_point(alpha = 0.6) +
+  scale_size(range = c(3, 12)) +
+  labs(title = "Bubble Plot of Review Scores Cleanliness and Reviews per Month",
+       x = "Reviews per Month",
+       y = "Review Score Cleanliness",
+       size = "Accommodates",
+       color = "Room Type")
+
+#plot3 #price vs reviews
+ggplot(r_clean_Viz, aes(x = review_scores_rating, y = log(price))) +
+  geom_point() +
+  labs(title = "Price vs. Review Scores in Retiro",
+       x = "Review Scores",
+       y = "Price (Log Scale)")
+
+#plot 4 : top 5 property type in retiro by price
+ggplot(r_clean_Viz, aes(x = accommodates, y = price)) +
+  geom_col(stat = "summary", fun = median) +
+  labs(title = "Price by Accommodates in Retiro",
+       x = "Accommodates",
+       y = "Median Price (Log Scale)")
+
+#plot 5 :proportion of room types in retiro 
+ggplot(r_clean_Viz, aes(x = "", fill = room_type)) +
+  geom_bar(width = 1) +
+  coord_polar(theta = "y") +
+  labs(title = "Proportion of Room Types in Retiro",
+       fill = "Room Type") 
+
+#III.B
+#"Proportion of Room Types in Retiro" refers to the
+#percentage distribution of different types of rooms 
+#available in the Retiro neighborhood. The pie chart or 
+# representing this proportion shows the relative 
+#frequency of each room type (such as Entire home/apt, 
+#Private room, Shared room) in the total number of 
+#listings available in Retiro.
+```
+
+B. Write a two-paragraph description that explains the choices that you made,
+and what the resulting plots show.
+
+
+###IV. Mapping
+
+A. Generate a map of your neighborhood using any R mapping tool. Do any key
+features here seem to stand out? What are a few of the things your map
+shows you about the neighborhood?
+
+```{r}
+#IV. Mapping
+#IV.A
+library(leaflet)
+map <- leaflet() %>% addTiles() %>% addCircles(lng= r_clean$longitude , lat= r_clean$latitude) %>%
+  addProviderTiles(providers$OpenStreetMap.HOT)
+map 
+# I saw an outlier at right upper on the map. 
+#Except that one, all others records are located at a same place.
+
+```
+
+
+###V. Wordcloud
+
+A. Using the neighborhood overview column in your dataset, generate a
+wordcloud. What are some terms that seem to be emphasized here?
+
+```{r}
+#V. Wordcloud
+library(tidytext)
+library(wordcloud)
+tidy_text_clean <- r_clean %>%
+  unnest_tokens(word, neighborhood_overview) %>%
+  anti_join(stop_words) %>%
+  filter(!word %in% c("he", "she", "they", "him", "her", "it",
+                      "ele", "ela", "eles", "dele", "dela", "isso",
+                      "no","overview","de","la","br","el","en")) %>%
+  count(word)
+wordcloud(words = tidy_text_clean$word, freq = tidy_text_clean$n, max.words = 70, random.order = FALSE)
+```
+
+
+
+##Step II: Prediction (20 points)
+I. Create a multiple regression model with the outcome variable price. You can
+assume that the prices are expressed in Argentine pesos.
+
+A. Describe your process. How did you wind up including the independent
+variables that you kept, and discarding the ones that you didn’t keep? In a
+narrative of at least two paragraphs, discuss your process and your
+reasoning. In the write-up, be sure to talk about how you evaluated the
+quality of your model.
+
+B. Show a screenshot of your regression summary, and explain the regression
+equation that it generated.
+
+C. Analyze any other metrics that are relevant for linear regression models.
+Based on these, what can you say about your model’s performance in 1-2
+paragraphs?
+When performing this step, you may wish to consider a log transformation on the response
+variable.
+
+```{r}
+
+r_clean_prediction <- r_clean
+```
+```{r}
+# turn response rate to numeric variable
+r_clean_prediction$host_response_rate <- as.numeric(gsub("[^0-9.]", "", r_clean_prediction$host_response_rate))
+```
+```{r}
+# fill up missing valua as median
+r_clean_prediction$host_response_rate <- ifelse(is.na(r_clean_prediction$host_response_rate), median(r_clean_prediction$host_response_rate, na.rm = TRUE), r_clean_prediction$host_response_rate)
+```
+```{r}
+# creat dummy variable
+r_clean_prediction$superhost <- ifelse(r_clean_prediction$host_is_superhost=='True',1,0)
+r_clean_prediction$profile <- ifelse(r_clean_prediction$host_has_profile_pic=='True',1,0)
+r_clean_prediction$profile <- ifelse(r_clean_prediction$host_has_profile_pic=='True',1,0)
+r_clean_prediction$id_verified <- ifelse(r_clean_prediction$host_identity_verified=='True',1,0)
+```
+```{r}
+# dop non-numeric variable
+r_clean_prediction <- r_clean_prediction %>%
+  mutate_if(is.numeric, ~if_else(is.na(.), median(., na.rm = TRUE), .))
+```
+```{r}
+# remove all non-numeric variables
+r_clean_prediction <- r_clean_prediction %>%
+  select_if(is.numeric)
+```
+```{r}
+# remove id, longitude and latitude
+r_clean_prediction <- r_clean_prediction[,-c(3,4)]
+```
+```{r}
+# log transformation of proce
+r_clean_prediction$price <- log(r_clean_prediction$price)
+```
+```{r}
+# create testing and training set
+set.seed(50)
+sampler <- sample_n(r_clean_prediction, 888)
+train <- slice(sampler, 1:533)
+test <- slice(sampler, 534:888)
+```
+```{r}
+# regression model for all variable
+m <-lm(price~.,train)
+```
+```{r}
+summary(m)
+```
+```{r}
+# drop not signifcant variable and do regression model again
+m <-lm(price~host_response_rate+host_total_listings_count+accommodates+bedrooms+beds+minimum_nights+
+       availability_30+review_scores_cleanliness+calculated_host_listings_count+calculated_host_listings_count_entire_homes+
+       calculated_host_listings_count_private_rooms+reviews_per_month+review_scores_value+review_scores_checkin+
+       review_scores_rating+availability_60+availability_90,train)
+summary(m)
+```
+```{r}
+# use testing set to do prediction 
+log_pred1 <- predict(m,test)
+log_pred2<- predict(m,train)
+```
+```{r}
+library(forecast)
+accuracy(log_pred1, test$price)
+accuracy(log_pred2, train$price)
+```
+
+##Step III: Classification (40 points)
+Part I. Using k-nearest neighbors, predict whether a rental in your neighborhood will have
+some particular amenity, or combination of amenities. Use any set of numerical predictors
+in order to build this model. You can decide which amenity, or set of amenities, to use as
+your outcome variable.
+
+(Hint: the grepl() function is worth exploring in order to perform this step).
+A. Show the code you used to run your model, and the code you used to assess
+your model.
+
+B. Write a two-paragraph narrative that describes how you did this. In your
+narrative, be sure to describe your predictor choices, and mention how you
+arrived at the particular k value that you used.
+
+
+Cut the dataframe to numerical predictables
+
+```{r}
+r_clean_select <- select(r_clean, review_scores_rating, review_scores_accuracy, review_scores_cleanliness, review_scores_checkin, review_scores_communication, review_scores_location, review_scores_value, amenities)
+```
+
+Creates column for our chosen amenity
+```{r}
+r_clean_select$has_wifi <- as.integer(grepl("Wifi", r_clean_select$amenities))
+r_clean_select
+```
+Dropping amenities
+```{r}
+r_clean_select <- subset(r_clean_select, select = -c(amenities))
+```
+
+Data Partition
+```{r}
+library(dplyr)
+set.seed(50)
+sampler <- sample_n(r_clean_select, 888)
+r_clean_train <- slice(sampler, 1:533)
+r_clean_valid <- slice(sampler, 534: 888)
+```
+
+
+T-test
+```{r}
+no_wifi<- r_clean_train[r_clean_train["has_wifi"]==0,]
+wifi<- r_clean_train[r_clean_train["has_wifi"]==1,]
+
+t.test(no_wifi$review_scores_rating, wifi$review_scores_rating)
+t.test(no_wifi$review_scores_accuracy, wifi$review_scores_accuracy)
+t.test(no_wifi$review_scores_cleanliness, wifi$review_scores_cleanliness)
+t.test(no_wifi$review_scores_checkin, wifi$review_scores_checkin)
+t.test(no_wifi$review_scores_communication, wifi$review_scores_communication)
+t.test(no_wifi$review_scores_location, wifi$review_scores_location)
+t.test(no_wifi$review_scores_value, wifi$review_scores_value)
+```
+
+```{r}
+r_clean_train <- select(r_clean_train, -c('review_scores_location'))
+r_clean_valid <- select(r_clean_valid, -c('review_scores_location'))
+r_clean_select1 <- select(r_clean_select, -c('review_scores_location'))
+```
+
+Creating my dataframe
+```{r}
+df_airbnb <- data.frame(review_scores_rating = 4.58,
+                   review_scores_accuracy = 4.62,
+                   review_scores_cleanliness = 4.49,
+                   review_scores_checkin = 4.85,
+                   review_scores_communication = 4.94,
+                   review_scores_value = 4.58)
+#Apartamento de 1 cuarto cerca de Plaza San Martín
+```
+
+Normalize
+```{r}
+r_clean_train.norm <- r_clean_train
+r_clean_valid.norm <- r_clean_valid
+r_clean_select1.norm <- r_clean_select1      
+df_airbnb.norm <- df_airbnb   
+
+norm.values <- preProcess(r_clean_train[, 1:6], method=c("center", "scale"))
+```
+
+
+Using the knn() function from the FNN package, and using a k-value of 7, generate a predicted classification for my apartment: 'Apartamento de 1 cuarto cerca de Plaza San Martín'
+```{r}
+r_clean_train.norm[, 1:6] <- predict(norm.values, r_clean_train[, 1:6])
+r_clean_valid.norm[, 1:6] <- predict(norm.values, r_clean_valid[, 1:6])
+r_clean_select1.norm[, 1:6] <- predict(norm.values, r_clean_select1[, 1:6])
+df_airbnb.norm[, 1:6] <- predict(norm.values, df_airbnb[, 1:6]) 
+```
+
+
+```{r}
+library(FNN)
+nn <- knn(train = r_clean_train.norm[, 1:6], test = df_airbnb.norm[, 1:6] , 
+          cl = r_clean_train.norm[, 7] , k = 7) 
+
+row.names(r_clean_train)[attr(nn, "nn.index")]
+nn
+
+neighbors <- r_clean_train.norm[c(241, 285, 361, 158, 165, 217, 11), ]
+neighbors
+```
+
+```{r}
+#DF with NN values and the name
+r_clean_new <- r_clean[c(241, 285, 361, 158, 165, 217, 11), ]
+column_to_insert <- r_clean_new$name
+new_df <- cbind(column_to_insert, neighbors)
+new_df
+```
+
+
+###Naive Bayes: We are recycling the dataset from above and are using r_clean_train
+
+A. Using any set of predictors, build a model using the naive Bayes algorithm,
+with the purpose of predicting whether a particular rental will be instantly
+bookable. (instant_bookable is a logical variable in this dataset).
+
+B. Describe a fictional apartment, and use your model to predict which bin it
+will fall into.
+
+C. Show a screenshot of the code you used to build your model, the code you
+used to run the algorithm, and code you used to assess the algorithm.
+
+D. Write a two-paragraph narrative that describes how you did this. In your
+narrative, be sure to talk about things like feature selection and testing
+against your training data.
+
+
+New Set of Predictors chosen
+```{r}
+names(r_clean)
+```
+Selected Variables
+```{r}
+r_clean_NB <- select(r_clean, review_scores_rating, review_scores_accuracy, review_scores_cleanliness, review_scores_checkin, review_scores_communication, review_scores_location, review_scores_value, price, beds, accommodates, host_is_superhost, host_response_time, calculated_host_listings_count, host_has_profile_pic, host_identity_verified, number_of_reviews, reviews_per_month, instant_bookable)
+```
+
+
+```{r}
+table(r_clean_NB$instant_bookable)
+```
+
+
+Make price numeric
+```{r}
+r_clean_NB$price <- gsub("[\\$,]", "", r_clean_NB$price)
+r_clean_NB$price <- as.numeric(r_clean_NB$price)
+```
+
+Turn categorical variables into factors
+```{r}
+r_clean_NB$host_is_superhost <- factor(r_clean_NB$host_is_superhost)
+r_clean_NB$host_response_time <- factor(r_clean_NB$host_response_time)
+r_clean_NB$instant_bookable <- factor(r_clean_NB$instant_bookable)
+r_clean_NB$host_has_profile_pic <- factor(r_clean_NB$instant_bookable)
+r_clean_NB$host_identity_verified <- factor(r_clean_NB$instant_bookable)
+r_clean_NB$beds <- factor(r_clean_NB$beds)
+r_clean_NB$accommodates <- factor(r_clean_NB$accommodates)
+```
+
+Check
+```{r}
+str(r_clean_NB)
+```
+
+Equal frequency binning because of multiple very skewed ratings
+```{r}
+vars_to_bin <- c("review_scores_rating", "review_scores_accuracy", 
+                 "review_scores_cleanliness", "review_scores_checkin", 
+                 "review_scores_communication", "review_scores_location", 
+                 "review_scores_value", "price", 
+                 "host_response_time", "calculated_host_listings_count", 
+                 "number_of_reviews", "reviews_per_month", "beds", "accommodates")
+
+for (var in vars_to_bin) {
+  r_clean_NB[[var]] <- as.factor(ntile(r_clean_NB[[var]], 3))
+}
+
+
+levels(r_clean_NB$review_scores_accuracy) <- c("Low", "Middle", "High")
+levels(r_clean_NB$review_scores_cleanliness) <- c("Low", "Middle", "High")
+levels(r_clean_NB$review_scores_checkin) <- c("Low", "Middle", "High")
+levels(r_clean_NB$review_scores_communication) <- c("Low", "Middle", "High")
+levels(r_clean_NB$review_scores_location) <- c("Low", "Middle", "High")
+levels(r_clean_NB$review_scores_value) <- c("Low", "Middle", "High")
+levels(r_clean_NB$price) <- c("Low", "Middle", "High")
+levels(r_clean_NB$host_response_time) <- c("Low", "Middle", "High")
+levels(r_clean_NB$calculated_host_listings_count) <- c("Low", "Middle", "High")
+levels(r_clean_NB$number_of_reviews) <- c("Low", "Middle", "High")
+levels(r_clean_NB$reviews_per_month) <- c("Low", "Middle", "High")
+levels(r_clean_NB$beds) <- c("Low", "Middle", "High")
+levels(r_clean_NB$accommodates) <- c("Low", "Middle", "High")
+```
+
+```{r}
+str(r_clean_NB)
+```
+
+Data Partition
+```{r}
+library(dplyr)
+set.seed(50)
+sampler <- sample_n(r_clean_NB, 888)
+r_clean_train <- slice(r_clean_NB, 1:533)
+r_clean_valid <- slice(r_clean_NB, 534: 888)
+```
+
+Visualizations
+```{r}
+ggplot(r_clean_train, aes(x = review_scores_rating, fill = instant_bookable)) +
+  geom_bar(position = "fill")
+
+ggplot(r_clean_train, aes(x = review_scores_accuracy, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+
+ggplot(r_clean_train, aes(x = review_scores_cleanliness, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+ 
+
+ggplot(r_clean_train, aes(x = review_scores_checkin, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+
+
+ggplot(r_clean_train, aes(x = review_scores_communication, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+
+ggplot(r_clean_train, aes(x = review_scores_value, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+
+ggplot(r_clean_train, aes(x = price, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+
+ggplot(r_clean_train, aes(x = beds, fill = instant_bookable)) +
+  geom_bar(position = "fill")
+
+ggplot(r_clean_train, aes(x = accommodates, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = host_is_superhost, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = host_response_time, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = calculated_host_listings_count, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = number_of_reviews, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = reviews_per_month, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = host_has_profile_pic, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+
+ggplot(r_clean_train, aes(x = host_identity_verified, fill = instant_bookable)) +
+  geom_bar(position = "fill") 
+```
+Based on the histogram we should remove host_is_superhost, host_identity_verified, host_has_profile_pic, and accommodates
+
+host_is_superhost and host_identity_verified have a perfect correlation to instant bookable in this dataset. This means our model would overstate its accuracy significantly if we incldude these variables.
+
+```{r}
+r_clean_train <- r_clean_train[, !(names(r_clean_train) %in% c( "host_has_profile_pic", "accommodates", "host_has_profile_pic", "host_identity_verified"))]
+r_clean_valid <- r_clean_valid[, !(names(r_clean_valid) %in% c( "host_has_profile_pic", "accommodates", "host_has_profile_pic", "host_identity_verified"))]
+```
+
+
+Naive Bayes Model
+```{r}
+library(e1071)
+rating.nb <- naiveBayes(instant_bookable ~ ., data = r_clean_train)
+rating.nb
+```
+```{r}
+dim(r_clean_train)
+```
+
+Accuracy
+```{r}
+#Training
+pred_train <- predict(rating.nb, newdata = r_clean_train[1:15])
+confusionMatrix(pred_train, r_clean_train$instant_bookable)
+
+#Validation
+pred_val <- predict(rating.nb, newdata = r_clean_valid[1:15])
+confusionMatrix(pred_val, r_clean_valid$instant_bookable)
+```
+
+Fictional Apartment
+```{r}
+df_apart <- data.frame(review_scores_rating = "3",
+                   review_scores_accuracy = "Low",
+                   review_scores_cleanliness = "Low",
+                   review_scores_checkin = "Middle",
+                   review_scores_communication = "High",
+                   review_scores_value = "High",
+                   price = "Low",
+                   beds = "Middle",
+                   host_is_superhost= "t",
+                   host_response_time= "Middle",
+                   calculated_host_listings_count= "High",
+                   number_of_reviews= "High",
+                   reviews_per_month= "Low")
+```
+Predict on fictional apartment
+```{r}
+predict(rating.nb, newdata = df_apart)
+
+```
+For this particular apartment the prediction is that it will not be instantly bookable.
+
+
+Overall this model was quite hard to produce. First, we included all available categorical or numerical parameters in our initial data selection. The specific variables can be seen in the code. We performed preprocessing steps on price, which was in string format and also converted categorical variables (also still in string format) and numerical variables into factors. We then split our data into 40% test set and 60% training set. We visualized the training set portion and came to the conclusion that we have to remove variables that do not show any difference among outcome classes from the model. Most importantly, however, it was also imperative to remove the two variables profile picture and host identity variables, because their outcomes perfectly correlated with the outcome of "instant_bookable". If we would have included them our accuracy would have been 100% in the training data. We actually tested this and saw that the test set accuracy would also have been 100%.
+
+When testing our model, we see that our Naive Bayes Model does not generalize well on unseen test data. In fact, the accuracy drops significantly from 74.6% to 58.3%, which is just slightly better than random. This is not surprising as Naive Bayes is prone to overfitting, especially when the training data is relatively small, which is the case for us with just 888 records to work with.
+
+
+Classification, Part III. Classification Tree
+
+A. Build a classification tree that predicts the review score that a rental in your
+neighborhood will have. Before you can do this, you will need to first bin the
+review_scores_rating variable -- the number of bins you create is up to you.
+Do not use any of the other review_scores variables as inputs.
+
+B. Determine the ideal size of your tree using cross-validation.
+
+C. Using rpart.plot and your choice of graphical parameters, show your tree
+model here.
+
+D. In a 1-2 paragraph write-up, describe your process. Talk about some of the
+features that you considered using, and your reasons why. Mention anything
+that you found interesting as you explored various possible models, and the
+process you used to arrive at the model you finished with. Talk about the
+relative sizes of each bin (using the number of records per bin) and how that
+may have impacted your model.
+
+
+Input Variables
+```{r}
+r_clean_TR <- select(r_clean, review_scores_rating, price, beds, accommodates, host_is_superhost, host_response_time, calculated_host_listings_count, host_has_profile_pic, host_identity_verified, number_of_reviews, reviews_per_month, instant_bookable)
+```
+
+```{r}
+str(r_clean_TR)
+```
+```{r}
+summary(r_clean_TR$review_scores_rating)
+```
+
+Convert price to numeric
+```{r}
+r_clean_TR$price <- gsub("[\\$,]", "", r_clean_NB$price)
+r_clean_TR$price <- as.numeric(r_clean_NB$price)
+```
+
+Round Scores to "good" and "bad"
+```{r}
+r_clean_TR$review_scores_rating <- as.factor(ntile(r_clean_TR$review_scores_rating, 2))
+levels(r_clean_TR$review_scores_rating) <- c("Low Score", "High Score")
+```
+
+
+Data Partition 
+```{r}
+library(dplyr)
+set.seed(50)
+sampler <- sample_n(r_clean_TR, 888)
+CT_variables_train <- slice(sampler, 1:533)
+CT_variables_valid <- slice(sampler, 534: 888)
+```
+
+Build a tree model with this data set, using lfp as your outcome variable.
+```{r}
+library(rpart)
+tree <- rpart(review_scores_rating ~ ., data = CT_variables_train, control = rpart.control(maxdepth = 4), method = "class")
+```
+
+rpart.plot to display a classification tree that depicts your model.
+
+```{r}
+library(rpart.plot)
+prp(tree, type = 3, extra = 3, split.font = 1, varlen = 25, box.palette = c("red","green"), border.col = 0) 
+```
+Crossvalidation
+```{r}
+crossvalidation <- rpart(review_scores_rating ~ ., data = CT_variables_train, method = "class", cp = 0.00001, minsplit = 2, xval = 5)
+
+a <- printcp(crossvalidation)
+a <- data.frame(a)
+xerror<- which.min(a$xerror)
+xerror
+```
+
+Smallest xstd: 0.042374 - Complexity parameter: 0.0131579
+```{r}
+tree2 <- rpart(review_scores_rating ~ ., data = CT_variables_train, method = "class", cp = 0.0131579)
+
+prp(tree2, type = 5, extra = 5, split.font = 1, varlen = 25, box.palette = c("red","green"), border.col = 0)
+```
+
+```{r}
+library(caret)
+library(ggplot2)
+model.pred <- predict(tree2, CT_variables_train, type = "class")
+confusionMatrix(model.pred, CT_variables_train$review_scores_rating)
+
+model.pred2 <- predict(tree2, CT_variables_valid, type = "class")
+confusionMatrix(model.pred2, CT_variables_valid$review_scores_rating)
+```
+
+##Step IV: Clustering (15 points)
+
+I. Perform either a k-means analysis or a hierarchical clustering analysis in order to
+place rental units within your neighborhood into clusters (each observation in your
+dataframe is one rental unit).
+** Of any section of the project, this one offers the most opportunity to be creative
+and take risks. Think about feature engineering, too -- how/when/where can you
+create new variables based on existing ones?
+
+II. Show your code and results. Name and describe each of your clusters. In 1-2
+paragraphs, describe the process that you used for variable selection and model
+building.
+
+III. Include at least three simple visualizations that describe your clustering model. A
+simple visualization can be a scatterplot, histogram, barplot, boxplot, violin plot, etc.
+Write 1-2 sentences for each visualization to explain what it shows. Do not include
+
+```{r}
+#Step IV Clustering 
+
+#I
+cluster_group <- r_clean[,c('host_total_listings_count','latitude','longitude','accommodates',
+                            'bedrooms','beds','price','minimum_nights','maximum_nights','availability_30',
+                            'availability_60','availability_90','availability_365','number_of_reviews',
+                            'number_of_reviews_ltm','number_of_reviews_l30d','review_scores_rating',
+                            'review_scores_accuracy','review_scores_cleanliness','review_scores_checkin',
+                            'review_scores_communication','review_scores_location','review_scores_value',
+                            'calculated_host_listings_count','calculated_host_listings_count_entire_homes',
+                            'calculated_host_listings_count_private_rooms','calculated_host_listings_count_shared_rooms',
+                            'reviews_per_month')]
+
+
+
+
+#II
+set.seed(123)
+km <- kmeans(cluster_group, centers = 5)
+cluster_group$cluster <- km$cluster
+aggregate(cluster_group, by=list(cluster_group$cluster), mean)
+km$cluster <- ifelse(km$cluster==1, 'popular choice',km$cluster)
+km$cluster <- ifelse(km$cluster==2, 'big group',km$cluster)
+km$cluster <- ifelse(km$cluster==3, 'expensive',km$cluster)
+km$cluster <- ifelse(km$cluster==4, 'big neighborhood',km$cluster)
+km$cluster <- ifelse(km$cluster==5, 'not temporary',km$cluster)
+# cluster 1 has the highest average number of reviews which is 32.17, so this cluster is very popular.
+# cluster 2 has the highest average accommodates which is 6.5, so this cluster is for big groups.
+# cluster 3 has the highest average price which is 2300811, so this cluster is very expensive
+# cluster 4 has the highest average calculated_host_listings_count which is 26.31, so this cluster has many avaliable choices.
+# cluster 5 has the highest average minimum_nights which is 13, so this cluster is not for temporary.
+
+#III
+library(ggplot2)
+ggplot(cluster_group, aes(x = log(price), y = accommodates,color=cluster)) +
+  geom_point(size=3)
+# In general, clusters with big number (4,5) are more expensive and clusters with small number do not support
+# big group because of small accommodation.
+ggplot(cluster_group, aes(x=log(price), y=number_of_reviews_ltm,color=cluster)) +
+  geom_bar(stat="identity") 
+# Cluster with higher price has less review numbers. And most records have around 50 reviews.
+ggplot(cluster_group, aes(x = log(price), y = review_scores_communication,color=cluster)) +
+  geom_point() 
+# Most records have a 4.5 to 5 review scores. Seems like price does not affect the score. 
+```
+
