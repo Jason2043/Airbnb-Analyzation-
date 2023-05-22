@@ -1,6 +1,5 @@
 ---
 title: "AD699_FinalProject"
-author: "Paul Seiters"
 date: "2023-05-06"
 output: html_document
 ---
